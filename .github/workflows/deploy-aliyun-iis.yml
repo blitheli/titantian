@@ -1,0 +1,194 @@
+# 推送到阿里云 Windows IIS：D:\IIS\tiantian
+# 流程：npm ci → npm run build → rclone 把 dist 里的文件同步到站点根。
+# index.html 直接落在 D:\IIS\tiantian\index.html，不会多套一层 dist。
+#
+# 仓库 Secrets（不要把主机、账号、私钥或密码写进仓库）:
+#   ALIYUN_HOST      服务器公网 IP 或域名
+#   ALIYUN_USER      Windows 登录名
+#   ALIYUN_PORT      SSH/SFTP 端口
+#   ALIYUN_SSH_KEY   OpenSSH 私钥全文；与 ALIYUN_PASSWORD 至少配一个。两者都有时用私钥
+#   ALIYUN_PASSWORD  登录密码（rclone obscure 后使用）
+#   ALIYUN_HOST_KEY  可选，ssh-keyscan 的整行输出，用于固定主机密钥
+#
+# 服务器需开启 OpenSSH Server，安全组放行该端口，账号对 D:\IIS\tiantian 有写权限。
+
+name: Deploy to Aliyun IIS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-aliyun-iis
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and sync dist to IIS
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ALIYUN_HOST: ${{ secrets.ALIYUN_HOST }}
+      ALIYUN_USER: ${{ secrets.ALIYUN_USER }}
+      ALIYUN_PORT: ${{ secrets.ALIYUN_PORT }}
+      ALIYUN_SSH_KEY: ${{ secrets.ALIYUN_SSH_KEY }}
+      ALIYUN_PASSWORD: ${{ secrets.ALIYUN_PASSWORD }}
+      ALIYUN_HOST_KEY: ${{ secrets.ALIYUN_HOST_KEY }}
+      DEST: /D:/IIS/tiantian
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Check secrets
+        run: |
+          set -euo pipefail
+          missing=0
+          if [ -z "${ALIYUN_HOST}" ]; then
+            echo "::error::缺少 Secret ALIYUN_HOST（服务器公网 IP 或域名）"
+            missing=1
+          fi
+          if [ -z "${ALIYUN_USER}" ]; then
+            echo "::error::缺少 Secret ALIYUN_USER（Windows 登录名）"
+            missing=1
+          fi
+          if [ -z "${ALIYUN_PORT}" ]; then
+            echo "::error::缺少 Secret ALIYUN_PORT（SSH/SFTP 端口）"
+            missing=1
+          fi
+          if [ -z "${ALIYUN_SSH_KEY}" ] && [ -z "${ALIYUN_PASSWORD}" ]; then
+            echo "::error::请配置 ALIYUN_SSH_KEY（OpenSSH 私钥）或 ALIYUN_PASSWORD（登录密码），至少一项。两者都有时使用私钥。"
+            missing=1
+          fi
+          case "${DEST}" in
+            /D:/IIS/tiantian) ;;
+            *)
+              echo "::error::拒绝同步：目标必须是 /D:/IIS/tiantian，当前为 ${DEST}"
+              exit 1
+              ;;
+          esac
+          if [ "$missing" -ne 0 ]; then
+            echo "工作流因缺少 Secrets 而停止。请到仓库 Settings — Secrets and variables — Actions 补齐这些 Secrets 后，重新运行本工作流："
+            echo "  ALIYUN_HOST、ALIYUN_USER、ALIYUN_PORT、ALIYUN_SSH_KEY、ALIYUN_PASSWORD、ALIYUN_HOST_KEY"
+            echo "其中 ALIYUN_SSH_KEY 与 ALIYUN_PASSWORD 至少配置一个（私钥优先）。ALIYUN_HOST_KEY 可选，用于固定主机密钥。"
+            exit 1
+          fi
+          if [ -n "${ALIYUN_SSH_KEY}" ]; then
+            auth="SSH 私钥"
+          else
+            auth="密码"
+          fi
+          printf '%s\n' "目标 ${ALIYUN_USER}@${ALIYUN_HOST}:${ALIYUN_PORT} -> D:\\IIS\\tiantian （认证：${auth}）"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify dist
+        run: |
+          set -euo pipefail
+          test -f dist/index.html
+          test -d dist
+          if [ -f dist/dist/index.html ]; then
+            echo "::error::构建结果套了两层 dist，拒绝上传。"
+            exit 1
+          fi
+          echo "dist 就绪。下列顶层内容会直接放到 D:\\IIS\\tiantian，而不是 D:\\IIS\\tiantian\\dist："
+          find dist -mindepth 1 -maxdepth 1 -printf '%f\n' | sort
+          du -sh dist
+
+      - name: Install rclone
+        run: |
+          set -euo pipefail
+          # 装到 RUNNER_TEMP，不能放进仓库目录或 dist，避免被同步上传。
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o rclone.zip "https://downloads.rclone.org/v1.75.1/rclone-v1.75.1-linux-amd64.zip"
+          unzip -q rclone.zip
+          mkdir -p "$RUNNER_TEMP/bin"
+          install -m 755 rclone-v1.75.1-linux-amd64/rclone "$RUNNER_TEMP/bin/rclone"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/rclone" version
+
+      - name: Sync dist to IIS
+        run: |
+          set -euo pipefail
+          case "${DEST}" in
+            /D:/IIS/tiantian) ;;
+            *)
+              echo "::error::拒绝同步：目标必须是 /D:/IIS/tiantian，当前为 ${DEST}"
+              exit 1
+              ;;
+          esac
+          test -f dist/index.html
+
+          PORT="${ALIYUN_PORT}"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          key_file="$RUNNER_TEMP/aliyun_key"
+          trap 'rm -f "$key_file"' EXIT
+
+          if [ -n "${ALIYUN_HOST_KEY}" ]; then
+            printf '%s\n' "$ALIYUN_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          else
+            ssh-keyscan -T 15 -p "$PORT" "$ALIYUN_HOST" > "$HOME/.ssh/known_hosts"
+            echo "主机密钥指纹（建议写入 Secret ALIYUN_HOST_KEY 以固定）:"
+            ssh-keygen -lf "$HOME/.ssh/known_hosts" || true
+          fi
+          chmod 600 "$HOME/.ssh/known_hosts"
+          if [ ! -s "$HOME/.ssh/known_hosts" ]; then
+            echo "::error::没有拿到服务器主机密钥，请确认 OpenSSH 已启动且安全组放行端口 ${PORT}"
+            exit 1
+          fi
+
+          export RCLONE_SFTP_HOST="$ALIYUN_HOST"
+          export RCLONE_SFTP_USER="$ALIYUN_USER"
+          export RCLONE_SFTP_PORT="$PORT"
+          # Windows OpenSSH：用 cmd 列目录，并关闭哈希校验（旧版 sftp 哈希不可靠）
+          export RCLONE_SFTP_SHELL_TYPE=cmd
+          export RCLONE_SFTP_DISABLE_HASHCHECK=true
+          export RCLONE_SFTP_KNOWN_HOSTS_FILE="$HOME/.ssh/known_hosts"
+
+          if [ -n "${ALIYUN_SSH_KEY}" ]; then
+            # 去掉 CR，避免网页里粘贴的私钥带 Windows 换行导致 ssh 拒绝
+            printf '%s\n' "$ALIYUN_SSH_KEY" | tr -d '\r' > "$key_file"
+            chmod 600 "$key_file"
+            export RCLONE_SFTP_KEY_FILE="$key_file"
+          else
+            export RCLONE_SFTP_PASS="$(rclone obscure "$ALIYUN_PASSWORD")"
+          fi
+
+          rclone mkdir ":sftp:${DEST}"
+          # 源是 dist 里面的文件，目标是站点根本身，不会多出一层 dist。
+          rclone sync ./dist ":sftp:${DEST}" \
+            --delete-after \
+            --transfers 8 \
+            --checkers 8 \
+            --retries 3 \
+            --low-level-retries 10 \
+            --stats 30s \
+            --log-level INFO
+
+          echo "远端 D:\\IIS\\tiantian 顶层："
+          rclone lsf ":sftp:${DEST}" --max-depth 1
+          if ! rclone lsf ":sftp:${DEST}" --max-depth 1 --files-only | grep -qx 'index.html'; then
+            echo "::error::D:\\IIS\\tiantian 根目录没有 index.html。dist 内容应直接位于该目录，而不是其子目录 dist。"
+            exit 1
+          fi
+          nested="$(rclone lsf ":sftp:${DEST}/dist" --max-depth 1 --files-only 2>/dev/null || true)"
+          if printf '%s\n' "$nested" | grep -qx 'index.html'; then
+            echo "::error::发现 D:\\IIS\\tiantian\\dist\\index.html，同步套错了一层目录。"
+            exit 1
+          fi
