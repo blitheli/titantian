@@ -349,7 +349,37 @@ function Practice({
   const [confirmStop, setConfirmStop] = useState(false)
   const stopRef = useRef<(() => void) | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const checkRef = useRef<HTMLButtonElement>(null)
+  const draftRef = useRef("")
+  const enterCommitted = useRef(false)
   const listenOk = canListenChinese()
+
+  useEffect(() => {
+    if (session.phase === "ask") inputRef.current?.focus()
+  }, [session.phase])
+
+  function rememberDraft(value: string) {
+    draftRef.current = value
+    setDraft(value)
+  }
+
+  function focusCheck() {
+    // 等本次回车结束再移动焦点，避免输入法确认和「对一下」被同一次按键一起触发。
+    window.setTimeout(() => {
+      const button = checkRef.current
+      if (!button) return
+      const until = performance.now() + 40
+      const swallowEcho = (event: KeyboardEvent) => {
+        if (event.key !== "Enter" && event.key !== " ") return
+        if (performance.now() > until) return
+        event.preventDefault()
+        event.stopPropagation()
+      }
+      button.addEventListener("keydown", swallowEcho, true)
+      button.focus()
+      window.setTimeout(() => button.removeEventListener("keydown", swallowEcho, true), 50)
+    }, 0)
+  }
 
   function stopListen() {
     stopRef.current?.()
@@ -402,13 +432,16 @@ function Practice({
     setSpeechNote("请说中文意思。说完可以改一改，再点「对一下」。")
     const stop = listenChinese({
       onText: (text) => {
-        if (text) setDraft(text)
+        if (text) rememberDraft(text)
       },
       onError: (message) => {
         if (message) setSpeechNote(message)
         setListening(false)
       },
-      onEnd: () => setListening(false),
+      onEnd: () => {
+        setListening(false)
+        if (draftRef.current.trim()) focusCheck()
+      },
     })
     if (!stop) {
       setSpeechNote("这台浏览器不能语音输入，直接打字就行。")
@@ -456,6 +489,11 @@ function Practice({
         <form
           onSubmit={(event) => {
             event.preventDefault()
+            const field = inputRef.current
+            if (field && document.activeElement === field && field.value.trim()) {
+              focusCheck()
+              return
+            }
             submit()
           }}
         >
@@ -472,14 +510,36 @@ function Practice({
             autoCorrect="off"
             spellCheck={false}
             lang="zh-CN"
-            enterKeyHint="done"
-            onChange={(event) => setDraft(event.target.value)}
+            enterKeyHint="next"
+            onChange={(event) => {
+              rememberDraft(event.target.value)
+              if (hint) setHint("")
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") {
+                enterCommitted.current = false
+                return
+              }
+              if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
+                enterCommitted.current = true
+                return
+              }
+              if (!event.currentTarget.value.trim()) return
+              event.preventDefault()
+              focusCheck()
+            }}
+            onCompositionEnd={(event) => {
+              if (!enterCommitted.current) return
+              enterCommitted.current = false
+              if (!event.currentTarget.value.trim()) return
+              focusCheck()
+            }}
           />
           <div className="row">
             <button className="secondary" type="button" onClick={toggleListen} disabled={!listenOk}>
               {listening ? "停一下" : "说它的意思"}
             </button>
-            <button className="primary tight" type="submit" data-testid="submit-answer">
+            <button ref={checkRef} className="primary tight" type="submit" data-testid="submit-answer">
               对一下
             </button>
           </div>
@@ -538,6 +598,10 @@ function Result({
   last: boolean
 }) {
   const correct = session.correct === true
+  const nextRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    nextRef.current?.focus()
+  }, [])
   return (
     <section className={correct ? "result good" : "result bad"} aria-live="polite">
       <h2>{correct ? "对，就是这个意思。" : session.skipped ? "想不起来也没关系。" : "这次没对上，没关系。"}</h2>
@@ -557,7 +621,7 @@ function Result({
         </div>
       )}
       <p className="quiet">{nextSeeText(due, now, session.againInSession, correct)}</p>
-      <button className="primary" type="button" data-testid="next-card" onClick={onNext}>
+      <button ref={nextRef} className="primary" type="button" data-testid="next-card" onClick={onNext}>
         {last ? "完成本轮" : "下一个"}
       </button>
     </section>

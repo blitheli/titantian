@@ -58,6 +58,12 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
   outline-offset: 2px;
 }
 
+.answer:focus,
+.practice .primary:focus {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+
 .app {
   width: min(34rem, 100%);
   margin: 0 auto;
