@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { answerMatches, normalizeAnswer } from "../src/lib/judge.ts"
+import { pickEnglishVoice } from "../src/lib/speech.ts"
 import { freshCard, nextEase, reviewCard } from "../src/lib/sm2.ts"
 import { buildMistakeQueue, buildPracticeQueue } from "../src/lib/session.ts"
 
@@ -66,6 +67,14 @@ assert.equal(answerMatches("苹果", ["是"]), false)
 assert.equal(answerMatches("", ["是"]), false)
 assert.equal(answerMatches("的", ["的"]), true)
 assert.equal(normalizeAnswer("好的"), "好")
+
+const google = { lang: "en-US", localService: false, name: "Google US English" }
+const zira = { lang: "en-US", localService: true, name: "Microsoft Zira" }
+const uk = { lang: "en-GB", localService: true, name: "Daniel" }
+assert.equal(pickEnglishVoice([google, zira, uk])?.name, "Microsoft Zira")
+assert.equal(pickEnglishVoice([uk, google])?.name, "Daniel")
+assert.equal(pickEnglishVoice([{ lang: "en_US", localService: true, name: "Samantha" }])?.name, "Samantha")
+assert.equal(pickEnglishVoice([{ lang: "zh-CN", localService: true, name: "Huihui" }]), null)
 
 const bank = JSON.parse(readFileSync(new URL("../src/data/words.json", import.meta.url), "utf8")) as {
   count: number
