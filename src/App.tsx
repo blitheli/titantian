@@ -12,6 +12,7 @@ import {
 } from "./lib/session.ts"
 import { freshCard, reviewCard } from "./lib/sm2.ts"
 import {
+  autoSpeakEnglish,
   canListenChinese,
   canSpeak,
   listenChinese,
@@ -73,6 +74,9 @@ export default function App() {
     }
     commit(() => ({ ...current, session }))
     setView("practice")
+    // 第一次朗读放在点击里同步触发，避免 iPhone 把后续自动发音静音。
+    const firstWord = first ? wordById.get(first) : undefined
+    if (firstWord) autoSpeakEnglish(firstWord.word)
   }
 
   function grade(correct: boolean, skipped: boolean, answer: string) {
@@ -116,6 +120,7 @@ export default function App() {
     const session = storeRef.current.session
     if (!session || session.phase !== "result") return
     if (session.index + 1 >= session.queue.length) {
+      stopSpeaking()
       const finished: LastRound = {
         correct: session.roundCorrect,
         wrong: session.roundWrong,
@@ -126,18 +131,19 @@ export default function App() {
       setView("done")
       return
     }
+    const index = session.index + 1
+    const nextId = session.queue[index]
+    const nextWord = nextId ? wordById.get(nextId) : undefined
     commit((prev) => {
       const current = prev.session
       if (!current) return prev
-      const index = current.index + 1
-      const id = current.queue[index]
       return {
         ...prev,
         session: {
           ...current,
           index,
           phase: "ask",
-          promptKind: classify(id ? prev.cards[id] : undefined),
+          promptKind: classify(nextId ? prev.cards[nextId] : undefined),
           correct: null,
           answer: "",
           skipped: false,
@@ -145,9 +151,12 @@ export default function App() {
         },
       }
     })
+    // 跟着「下一个」的点击同步朗读，避免 iPhone 把自动发音静音。
+    if (nextWord) autoSpeakEnglish(nextWord.word)
   }
 
   function abandon() {
+    stopSpeaking()
     commit((prev) => ({ ...prev, session: null }))
     setView("home")
   }
@@ -189,7 +198,10 @@ export default function App() {
           now={now}
           onGrade={grade}
           onNext={goNext}
-          onHome={() => setView("home")}
+          onHome={() => {
+            stopSpeaking()
+            setView("home")
+          }}
           onAbandon={abandon}
         />
       )}
@@ -358,6 +370,13 @@ function Practice({
     if (session.phase === "ask") inputRef.current?.focus()
   }, [session.phase])
 
+  useEffect(() => {
+    if (session.phase !== "ask" || !word) return
+    autoSpeakEnglish(word.word, (message) => {
+      if (message) setSpeechNote(message)
+    })
+  }, [id, session.phase, word])
+
   function rememberDraft(value: string) {
     draftRef.current = value
     setDraft(value)
@@ -390,7 +409,7 @@ function Practice({
   useEffect(() => {
     return () => {
       stopRef.current?.()
-      stopSpeaking()
+      // 不在这里 stopSpeaking：切到下一词时，点击里已启动的自动发音不要被卸载打断。
     }
   }, [])
 
@@ -798,7 +817,7 @@ function About({
       </p>
       <h2>语音</h2>
       <p>
-        「听发音」用这台设备自己的英语语音，不经过服务器。iPhone 侧边静音时没有声音。在微信里打开也经常没有声音，用 Safari、Chrome 或 Edge 打开即可。「说它的意思」用语音识别，安卓 Chrome 通常可以用。iPhone 上经常没有这项功能，直接打字就行。识别结果可以先改再提交。
+        单词出现时会自动读一次；「听发音」可以再听。用的是这台设备自己的英语语音，不经过服务器。iPhone 侧边静音时没有声音。在微信里打开也经常没有声音，用 Safari、Chrome 或 Edge 打开即可。「说它的意思」用语音识别，安卓 Chrome 通常可以用。iPhone 上经常没有这项功能，直接打字就行。识别结果可以先改再提交。
       </p>
       <h2>进度存在哪里</h2>
       <p>

@@ -126,6 +126,19 @@ export function speakEnglish(text: string, onError?: (message: string) => void):
   return true
 }
 
+/** 单词出现时自动读一次。若同一词已在朗读中，不再打断重读。 */
+export function autoSpeakEnglish(text: string, onError?: (message: string) => void): boolean {
+  if (!text || !canSpeak()) return false
+  const synth = window.speechSynthesis
+  if (
+    activeUtterance?.text === text &&
+    (synth.speaking || synth.pending)
+  ) {
+    return true
+  }
+  return speakEnglish(text, onError)
+}
+
 function speechErrorText(code: string): string {
   switch (code) {
     case "network":
