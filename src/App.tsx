@@ -478,7 +478,8 @@ function Practice({
         className="listen"
         type="button"
         onClick={() => {
-          if (!speakEnglish(word.word)) setSpeechNote("这台设备暂时读不出英文，可以看上面的读音。")
+          setSpeechNote("")
+          if (!speakEnglish(word.word, setSpeechNote)) setSpeechNote("这台设备暂时读不出英文，可以看上面的音标。")
         }}
         disabled={!canSpeak()}
       >
@@ -599,6 +600,7 @@ function Result({
 }) {
   const correct = session.correct === true
   const nextRef = useRef<HTMLButtonElement>(null)
+  const [exampleNote, setExampleNote] = useState("")
   useEffect(() => {
     nextRef.current?.focus()
   }, [])
@@ -615,9 +617,17 @@ function Result({
         <div className="example">
           <p className="en">{word.example}</p>
           {word.exampleZh && <p className="zh">{word.exampleZh}</p>}
-          <button className="text-btn" type="button" onClick={() => speakEnglish(word.example ?? "")}>
+          <button
+            className="text-btn"
+            type="button"
+            onClick={() => {
+              setExampleNote("")
+              if (!speakEnglish(word.example ?? "", setExampleNote)) setExampleNote("这台设备暂时读不出英文。")
+            }}
+          >
             听例句
           </button>
+          {exampleNote && <p className="quiet">{exampleNote}</p>}
         </div>
       )}
       <p className="quiet">{nextSeeText(due, now, session.againInSession, correct)}</p>
@@ -788,7 +798,7 @@ function About({
       </p>
       <h2>语音</h2>
       <p>
-        「听发音」用浏览器自带的英语语音。「说它的意思」用语音识别，安卓 Chrome 通常可以用。iPhone 上经常没有这项功能，直接打字就行。识别结果可以先改再提交。
+        「听发音」用这台设备自己的英语语音，不经过服务器。iPhone 侧边静音时没有声音。在微信里打开也经常没有声音，用 Safari、Chrome 或 Edge 打开即可。「说它的意思」用语音识别，安卓 Chrome 通常可以用。iPhone 上经常没有这项功能，直接打字就行。识别结果可以先改再提交。
       </p>
       <h2>进度存在哪里</h2>
       <p>

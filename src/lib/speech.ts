@@ -35,29 +35,114 @@ export function canSpeak(): boolean {
   return typeof window.speechSynthesis !== "undefined"
 }
 
+export type EnglishVoice = {
+  lang: string
+  localService?: boolean
+}
+
+export function pickEnglishVoice<T extends EnglishVoice>(voices: readonly T[]): T | null {
+  const english = voices.filter((voice) => voiceLang(voice).startsWith("en"))
+  let best: T | null = null
+  let bestScore = -1
+  for (const voice of english) {
+    const lang = voiceLang(voice)
+    const local = voice.localService === false ? 0 : 2
+    const region = lang.startsWith("en-us") ? 2 : 1
+    const score = local * 10 + region
+    if (score > bestScore) {
+      best = voice
+      bestScore = score
+    }
+  }
+  return best
+}
+
+function voiceLang(voice: EnglishVoice): string {
+  return voice.lang.toLowerCase().replace(/_/g, "-")
+}
+
 let speakTimer = 0
+let speakRun = 0
+let activeUtterance: SpeechSynthesisUtterance | null = null
 
 export function stopSpeaking(): void {
   window.clearTimeout(speakTimer)
+  speakRun += 1
+  activeUtterance = null
   window.speechSynthesis?.cancel()
 }
 
-export function speakEnglish(text: string): boolean {
+export function speakEnglish(text: string, onError?: (message: string) => void): boolean {
   if (!text || !canSpeak()) return false
   const synth = window.speechSynthesis
-  stopSpeaking()
-  const utterance = new SpeechSynthesisUtterance(text)
-  utterance.lang = "en-US"
-  utterance.rate = 0.86
-  const voice =
-    synth.getVoices().find((item) => item.lang.toLowerCase().startsWith("en-us")) ??
-    synth.getVoices().find((item) => item.lang.toLowerCase().startsWith("en"))
-  if (voice) utterance.voice = voice
-  speakTimer = window.setTimeout(() => {
-    synth.resume()
-    synth.speak(utterance)
-  }, 60)
+  window.clearTimeout(speakTimer)
+  const voice = pickEnglishVoice(synth.getVoices())
+
+  const begin = (chosen: SpeechSynthesisVoice | null, allowFallback: boolean) => {
+    const run = ++speakRun
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = chosen ? voiceLang(chosen) : "en-US"
+    utterance.rate = 0.86
+    if (chosen) {
+      try {
+        utterance.voice = chosen
+      } catch {
+        utterance.lang = "en-US"
+      }
+    }
+    activeUtterance = utterance
+    utterance.onend = () => {
+      if (activeUtterance === utterance) activeUtterance = null
+    }
+    utterance.onerror = (event) => {
+      if (run !== speakRun) return
+      if (event.error === "interrupted" || event.error === "canceled") return
+      const remoteFailed =
+        chosen?.localService === false &&
+        (event.error === "network" || event.error === "synthesis-failed" || event.error === "synthesis-unavailable")
+      if (allowFallback && remoteFailed) {
+        const local = pickEnglishVoice(synth.getVoices().filter((item) => item.localService !== false))
+        begin(local && local.localService !== false ? local : null, false)
+        return
+      }
+      onError?.(speechErrorText(event.error))
+    }
+    if (synth.paused) synth.resume()
+    try {
+      synth.speak(utterance)
+    } catch {
+      if (run === speakRun) onError?.(speechErrorText("synthesis-unavailable"))
+    }
+  }
+
+  // 空闲时不要 cancel()：Chrome 会把紧接着的 speak() 吞掉。
+  // 第一次朗读必须在点击里同步调用，否则 iPhone 会直接静音。
+  if (synth.speaking || synth.pending) {
+    synth.cancel()
+    speakTimer = window.setTimeout(() => begin(voice, true), 50)
+  } else {
+    begin(voice, true)
+  }
   return true
+}
+
+function speechErrorText(code: string): string {
+  switch (code) {
+    case "network":
+      return "在线英语语音没有连上。可以看上面的音标，或换 Safari、Chrome、Edge 打开。"
+    case "not-allowed":
+      return "浏览器拦住了朗读。请再点一次「听发音」。"
+    case "audio-hardware":
+    case "audio-busy":
+      return "没有找到能出声的设备。请检查是否静音，以及音量。"
+    case "language-unavailable":
+    case "voice-unavailable":
+    case "synthesis-unavailable":
+    case "synthesis-failed":
+      return "这台设备没有可用的英语语音，可以看上面的音标。"
+    default:
+      return "这台设备暂时读不出英文，可以看上面的音标。"
+  }
 }
 
 export function listenChinese(handlers: {
