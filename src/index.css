@@ -328,6 +328,14 @@ p { margin: 0 0 12px; }
 
 .pos { margin-right: 8px; }
 
+.prompt-example {
+  margin: 0 0 14px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.45;
+}
+
 .field-label {
   display: block;
   margin: 16px 0 6px;
@@ -360,15 +368,6 @@ p { margin: 0 0 12px; }
   font-weight: 700;
   line-height: 1.35;
 }
-
-.example {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-}
-
-.example .en { font-size: 1.05rem; }
-.example .zh { color: inherit; opacity: 0.85; }
 
 .result .quiet, .result .text-btn { color: inherit; }
 
