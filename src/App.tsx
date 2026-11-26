@@ -493,6 +493,11 @@ function Practice({
         {word.pos && <span className="pos">{word.pos}</span>}
         {word.phonetic && <span>/{word.phonetic}/</span>}
       </p>
+      {word.example && (
+        <p className="prompt-example" data-testid="word-example">
+          {word.example}
+        </p>
+      )}
       <button
         className="listen"
         type="button"
@@ -619,7 +624,6 @@ function Result({
 }) {
   const correct = session.correct === true
   const nextRef = useRef<HTMLButtonElement>(null)
-  const [exampleNote, setExampleNote] = useState("")
   useEffect(() => {
     nextRef.current?.focus()
   }, [])
@@ -632,23 +636,6 @@ function Result({
         </p>
       )}
       <p className="meanings">{word.meanings.join("  ·  ")}</p>
-      {word.example && (
-        <div className="example">
-          <p className="en">{word.example}</p>
-          {word.exampleZh && <p className="zh">{word.exampleZh}</p>}
-          <button
-            className="text-btn"
-            type="button"
-            onClick={() => {
-              setExampleNote("")
-              if (!speakEnglish(word.example ?? "", setExampleNote)) setExampleNote("这台设备暂时读不出英文。")
-            }}
-          >
-            听例句
-          </button>
-          {exampleNote && <p className="quiet">{exampleNote}</p>}
-        </div>
-      )}
       <p className="quiet">{nextSeeText(due, now, session.againInSession, correct)}</p>
       <button ref={nextRef} className="primary" type="button" data-testid="next-card" onClick={onNext}>
         {last ? "完成本轮" : "下一个"}
