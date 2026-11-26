@@ -331,8 +331,8 @@ p { margin: 0 0 12px; }
 .prompt-example {
   margin: 0 0 14px;
   text-align: center;
-  color: var(--muted);
-  font-size: 1.05rem;
+  color: var(--ink);
+  font-size: 1.3rem;
   line-height: 1.45;
 }
 
